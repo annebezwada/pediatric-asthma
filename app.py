@@ -8,12 +8,21 @@ from statistics import mean
 from urllib.parse import quote_plus
 import datetime as dt
 
-# ===================== Core Helpers (Geoapify + AirNow) =====================
+# =============================================================================
+#  CONFIG: API KEYS (PUT YOUR REAL KEYS HERE)
+# =============================================================================
 
-def geoapify_geocode(place: str, api_key: str) -> Tuple[float, float, str]:
+GEOAPIFY_KEY = "YOUR_GEOAPIFY_KEY_HERE"
+AIRNOW_KEY = "YOUR_AIRNOW_KEY_HERE"
+
+# =============================================================================
+#  CORE HELPERS: GEOAPIFY + AIRNOW
+# =============================================================================
+
+def geoapify_geocode(place: str) -> Tuple[float, float, str]:
     """Return (lat, lon, label) for a place name using Geoapify."""
     url = "https://api.geoapify.com/v1/geocode/search"
-    params = {"text": place, "apiKey": api_key}
+    params = {"text": place, "apiKey": GEOAPIFY_KEY}
     r = requests.get(url, params=params, timeout=20)
     data = r.json()
     features = data.get("features", [])
@@ -28,7 +37,6 @@ def geoapify_geocode(place: str, api_key: str) -> Tuple[float, float, str]:
 def geoapify_route(
     start: Tuple[float, float],
     end: Tuple[float, float],
-    api_key: str,
     route_type: str = "balanced",
     avoid: Optional[str] = None,
 ) -> dict:
@@ -45,7 +53,7 @@ def geoapify_route(
         "mode": "drive",
         "type": route_type,
         "format": "geojson",
-        "apiKey": api_key,
+        "apiKey": GEOAPIFY_KEY,
     }
     if avoid:
         params["avoid"] = avoid
@@ -78,7 +86,7 @@ def geoapify_route(
     }
 
 
-def airnow_aqi(lat: float, lon: float, api_key: str, distance_miles: int = 25) -> Optional[int]:
+def airnow_aqi(lat: float, lon: float, distance_miles: int = 25) -> Optional[int]:
     """Get current AQI near a point from AirNow. Returns max AQI or None."""
     url = "https://www.airnowapi.org/aq/observation/latLong/current"
     params = {
@@ -86,7 +94,7 @@ def airnow_aqi(lat: float, lon: float, api_key: str, distance_miles: int = 25) -
         "latitude": f"{lat:.4f}",
         "longitude": f"{lon:.4f}",
         "distance": str(distance_miles),
-        "API_KEY": api_key,
+        "API_KEY": AIRNOW_KEY,
     }
     r = requests.get(url, params=params, timeout=20)
     try:
@@ -102,8 +110,9 @@ def airnow_aqi(lat: float, lon: float, api_key: str, distance_miles: int = 25) -
     except Exception:
         return None
 
-
-# =============== Sampling + scoring routes ===============
+# =============================================================================
+#  ROUTE SAMPLING + SCORING
+# =============================================================================
 
 @dataclass
 class RouteScore:
@@ -127,7 +136,6 @@ def sample_points(coords: List[Tuple[float, float]], max_samples: int = 10) -> L
 
 def score_route(
     coords: List[Tuple[float, float]],
-    airnow_key: str,
     origin_label: str,
     dest_label: str,
     name: str,
@@ -137,7 +145,7 @@ def score_route(
     pts = sample_points(coords, max_samples=10)
     aqis = []
     for lat, lon in pts:
-        aqi = airnow_aqi(lat, lon, airnow_key)
+        aqi = airnow_aqi(lat, lon)
         if aqi is not None:
             aqis.append(aqi)
 
@@ -160,21 +168,15 @@ def score_route(
     )
 
 
-def plan_clean_routes_geoapify(
-    origin: str,
-    destination: str,
-    geoapify_key: str,
-    airnow_key: str,
-) -> List[RouteScore]:
+def plan_clean_routes_geoapify(origin: str, destination: str) -> List[RouteScore]:
     """
-    Agentic planner:
-      1. Geocode origin/destination.
-      2. Get multiple driving routes (short, balanced, avoid highways).
-      3. Sample AQI along each route.
-      4. Rank routes by pollution exposure.
+    1. Geocode origin/destination.
+    2. Get multiple driving routes (short, balanced, avoid highways).
+    3. Sample AQI along each route.
+    4. Rank routes by pollution exposure.
     """
-    o_lat, o_lon, o_label = geoapify_geocode(origin, geoapify_key)
-    d_lat, d_lon, d_label = geoapify_geocode(destination, geoapify_key)
+    o_lat, o_lon, o_label = geoapify_geocode(origin)
+    d_lat, d_lon, d_label = geoapify_geocode(destination)
     start = (o_lat, o_lon)
     end = (d_lat, d_lon)
 
@@ -188,14 +190,12 @@ def plan_clean_routes_geoapify(
 
     for name, cfg in configs:
         try:
-            r = geoapify_route(start, end, geoapify_key, **cfg)
-        except Exception as e:
-            # Skip configs that fail (e.g., no avoid-highways path)
+            r = geoapify_route(start, end, **cfg)
+        except Exception:
             continue
 
         s = score_route(
             coords=r["coords"],
-            airnow_key=airnow_key,
             origin_label=o_label,
             dest_label=d_label,
             name=name,
@@ -211,10 +211,11 @@ def plan_clean_routes_geoapify(
     scores.sort(key=lambda s: (s.avg_aqi, s.max_aqi))
     return scores
 
+# =============================================================================
+#  FORECAST HELPERS (WHEN TO TRAVEL)
+# =============================================================================
 
-# =============== Forecast helpers (WHEN to travel) ===============
-
-def airnow_forecast_zip(zip_code: str, api_key: str, distance_miles: int = 25):
+def airnow_forecast_zip(zip_code: str, distance_miles: int = 25):
     """
     Get AirNow AQI forecast for a ZIP code for the next few days.
     Returns list of {date, aqi, category, pollutant}.
@@ -224,7 +225,7 @@ def airnow_forecast_zip(zip_code: str, api_key: str, distance_miles: int = 25):
         "format": "application/json",
         "zipCode": zip_code,
         "distance": str(distance_miles),
-        "API_KEY": api_key,
+        "API_KEY": AIRNOW_KEY,
     }
     r = requests.get(url, params=params, timeout=20)
     try:
@@ -250,7 +251,7 @@ def airnow_forecast_zip(zip_code: str, api_key: str, distance_miles: int = 25):
             "pollutant": item.get("ParameterName", "Unknown"),
         })
 
-    # Merge pollutants by date (keep worst AQI)
+    # Merge pollutants by date (keep worst AQI per day)
     by_date = {}
     for f in forecast_days:
         d = f["date"]
@@ -260,11 +261,9 @@ def airnow_forecast_zip(zip_code: str, api_key: str, distance_miles: int = 25):
     return [by_date[d] for d in sorted(by_date.keys())]
 
 
-def suggest_best_travel_day(zip_code: str, api_key: str, look_ahead_days: int = 3):
-    """
-    Suggest best day in next N days (min AQI).
-    """
-    all_fc = airnow_forecast_zip(zip_code, api_key)
+def suggest_best_travel_day(zip_code: str, look_ahead_days: int = 3):
+    """Suggest best day in next N days (min AQI)."""
+    all_fc = airnow_forecast_zip(zip_code)
     today = dt.date.today()
     cutoff = today + dt.timedelta(days=look_ahead_days)
 
@@ -275,13 +274,27 @@ def suggest_best_travel_day(zip_code: str, api_key: str, look_ahead_days: int = 
     best = min(fc, key=lambda x: x["aqi"])
     return {"candidates": fc, "best": best}
 
+# =============================================================================
+#  MAP VISUALIZATION
+# =============================================================================
 
-# =============== Map visualization ===============
+def aqi_color(aqi: float) -> str:
+    """Return a color string based on AQI level."""
+    if aqi <= 50:
+        return "green"
+    if aqi <= 100:
+        return "yellow"
+    if aqi <= 150:
+        return "orange"
+    if aqi <= 200:
+        return "red"
+    return "purple"
+
 
 def show_routes_map(routes: List[RouteScore]) -> folium.Map:
     """
     Show all candidate routes on an interactive map.
-    Cleanest route = green, others = orange/red/etc.
+    Color based on AQI; cleanest route drawn thicker.
     """
     all_coords = [pt for r in routes for pt in r.coords]
     center_lat = sum(lat for lat, _ in all_coords) / len(all_coords)
@@ -289,9 +302,8 @@ def show_routes_map(routes: List[RouteScore]) -> folium.Map:
 
     m = folium.Map(location=[center_lat, center_lon], zoom_start=11)
 
-    colors = ["green", "orange", "red", "blue", "purple"]
     for idx, r in enumerate(routes):
-        color = colors[idx % len(colors)]
+        color = aqi_color(r.avg_aqi)
         tooltip = (
             f"{r.name}: avg AQI {r.avg_aqi:.1f}, max {r.max_aqi}, "
             f"{r.distance_km:.1f} km / {r.duration_min:.0f} min"
@@ -301,7 +313,7 @@ def show_routes_map(routes: List[RouteScore]) -> folium.Map:
             locations=[(lat, lon) for lat, lon in r.coords],
             color=color,
             weight=6 if idx == 0 else 4,
-            opacity=0.85 if idx == 0 else 0.6,
+            opacity=0.9 if idx == 0 else 0.6,
             tooltip=tooltip,
         ).add_to(m)
 
@@ -314,8 +326,74 @@ def show_routes_map(routes: List[RouteScore]) -> folium.Map:
 
     return m
 
+# =============================================================================
+#  DISPLAY HELPERS (SO RESULTS DON'T DISAPPEAR)
+# =============================================================================
 
-# ===================== Streamlit App UI =====================
+def render_plan(plan: dict):
+    """Render forecast + routes from a cached plan dict."""
+    candidates = plan["forecast_candidates"]
+    best_day = plan["forecast_best_day"]
+    routes = plan["routes"]
+    best_route = plan["best_route"]
+
+    # WHEN SECTION
+    st.subheader("🕒 When should we go?")
+
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        rows = [
+            {
+                "Date": f["date"].strftime("%a %b %d"),
+                "AQI": f["aqi"],
+                "Category": f["category"],
+                "Pollutant": f["pollutant"],
+            }
+            for f in candidates
+        ]
+        st.write("Forecast for the next few days (worst pollutant per day):")
+        st.table(rows)
+
+    with col2:
+        st.metric(
+            label="Suggested day for non-urgent trips",
+            value=best_day["date"].strftime("%a %b %d"),
+            delta=f"AQI {best_day['aqi']} ({best_day['category']})",
+        )
+
+    # HOW SECTION
+    st.subheader("🧭 How should we go?")
+
+    route_rows = []
+    for r in routes:
+        route_rows.append({
+            "Route": r.name,
+            "Distance (km)": f"{r.distance_km:.1f}",
+            "Time (min)": f"{r.duration_min:.0f}",
+            "Avg AQI": f"{r.avg_aqi:.1f}",
+            "Max AQI": r.max_aqi,
+        })
+    st.write("Routes ranked from **cleanest** (top) to **dirtiest**:")
+    st.table(route_rows)
+
+    st.success(
+        f"Recommended route: **{best_route.name}** "
+        f"({best_route.distance_km:.1f} km / {best_route.duration_min:.0f} min, "
+        f"avg AQI ≈ {best_route.avg_aqi:.1f}, max AQI {best_route.max_aqi})."
+    )
+    st.markdown(
+        f"[Open in Google Maps]({best_route.maps_url})  "
+        "(route shape is approximate but works for navigation)."
+    )
+
+    # MAP SECTION
+    st.subheader("🗺️ Route map (color-coded by average AQI)")
+    fmap = show_routes_map(routes)
+    st_folium(fmap, width=900, height=500)
+
+# =============================================================================
+#  STREAMLIT APP UI
+# =============================================================================
 
 st.set_page_config(page_title="Asthma Guardian – Clean Route Planner", layout="wide")
 
@@ -335,17 +413,12 @@ with st.expander("💡 What this app does", expanded=False):
         "- Uses AQI forecast at home ZIP to suggest a better day for non-urgent trips\n"
     )
 
-# Sidebar: keys + global settings
-st.sidebar.header("API Keys & Settings")
-geoapify_key = st.sidebar.text_input("Geoapify API key", type="password")
-airnow_key = st.sidebar.text_input("AirNow API key", type="password")
+# Sidebar settings
+st.sidebar.header("Settings")
 home_zip = st.sidebar.text_input("Home ZIP code", value="20874")
 look_ahead_days = st.sidebar.slider("Look ahead (days)", min_value=1, max_value=7, value=3)
 
-st.sidebar.markdown("---")
-mode = st.sidebar.radio("Mode", ["Parent view", "Kid-friendly summary"])
-
-# Main form
+# Main: trip planner form
 st.subheader("Plan a trip")
 
 with st.form("trip_form"):
@@ -353,94 +426,26 @@ with st.form("trip_form"):
     destination = st.text_input("Destination", "Children's National Hospital, Washington, DC")
     submitted = st.form_submit_button("Plan cleanest trip ✨")
 
+# Show last successful result so it doesn't disappear on reruns
+if "last_plan" in st.session_state:
+    render_plan(st.session_state["last_plan"])
+
+# Handle new submission
 if submitted:
-    if not geoapify_key or not airnow_key:
-        st.error("Please enter both Geoapify and AirNow API keys in the sidebar.")
-    else:
-        try:
-            with st.spinner("Thinking like an Asthma Guardian…"):
-                # 1) Forecast (WHEN)
-                forecast_plan = suggest_best_travel_day(home_zip, airnow_key, look_ahead_days)
-                candidates = forecast_plan["candidates"]
-                best_day = forecast_plan["best"]
+    try:
+        with st.spinner("Analyzing forecast and routes…"):
+            forecast_plan = suggest_best_travel_day(home_zip, look_ahead_days)
+            routes = plan_clean_routes_geoapify(origin, destination)
 
-                # 2) Routes (HOW)
-                routes = plan_clean_routes_geoapify(origin, destination, geoapify_key, airnow_key)
-                best_route = routes[0]
+        plan = {
+            "forecast_candidates": forecast_plan["candidates"],
+            "forecast_best_day": forecast_plan["best"],
+            "routes": routes,
+            "best_route": routes[0],
+        }
 
-            # ---- WHEN section ----
-            st.subheader("🕒 When should we go?")
+        st.session_state["last_plan"] = plan  # cache so it persists
+        st.experimental_rerun()  # immediately rerun to display via render_plan above
 
-            col1, col2 = st.columns([2, 1])
-            with col1:
-                rows = [
-                    {
-                        "Date": f["date"].strftime("%a %b %d"),
-                        "AQI": f["aqi"],
-                        "Category": f["category"],
-                        "Pollutant": f["pollutant"],
-                    }
-                    for f in candidates
-                ]
-                st.write("Forecast for the next few days (worst pollutant per day):")
-                st.table(rows)
-
-            with col2:
-                st.metric(
-                    label="Suggested day for non-urgent trips",
-                    value=best_day["date"].strftime("%a %b %d"),
-                    delta=f"AQI {best_day['aqi']} ({best_day['category']})",
-                )
-
-            # ---- HOW section ----
-            st.subheader("🧭 How should we go?")
-
-            route_rows = []
-            for r in routes:
-                route_rows.append({
-                    "Route": r.name,
-                    "Distance (km)": f"{r.distance_km:.1f}",
-                    "Time (min)": f"{r.duration_min:.0f}",
-                    "Avg AQI": f"{r.avg_aqi:.1f}",
-                    "Max AQI": r.max_aqi,
-                })
-            st.write("Routes ranked from **cleanest** (top) to **dirtiest**:")
-            st.table(route_rows)
-
-            st.success(
-                f"Recommended route: **{best_route.name}** "
-                f"({best_route.distance_km:.1f} km / {best_route.duration_min:.0f} min, "
-                f"avg AQI ≈ {best_route.avg_aqi:.1f}, max AQI {best_route.max_aqi})."
-            )
-            st.markdown(
-                f"[Open in Google Maps]({best_route.maps_url})  "
-                "(route shape is approximate but works for navigation)."
-            )
-
-            # ---- Map ----
-            st.subheader("🗺️ Route map (click & zoom)")
-            fmap = show_routes_map(routes)
-            st_folium(fmap, width=900, height=500)
-
-            # ---- Kid-friendly summary ----
-            if mode == "Kid-friendly summary":
-                st.subheader("🦉 Asthma Guardian says...")
-                # simple kid-friendly explanation
-                avg = best_route.avg_aqi
-                if avg <= 50:
-                    mood = "The air looks happy and clean today!"
-                elif avg <= 100:
-                    mood = "The air is okay, but we’re still being gentle with our lungs."
-                elif avg <= 150:
-                    mood = "The air is a bit grumpy, so this cleaner route helps your lungs stay calm."
-                else:
-                    mood = "The air isn’t feeling great today, so this route helps us stay as safe as we can."
-
-                st.write(
-                    f"“We’ll go on **{best_day['date'].strftime('%A')}** "
-                    f"and take the **{best_route.name}** path.\n\n"
-                    f"{mood} Thanks for taking such good care of baby lungs.” 💚"
-                )
-
-        except Exception as e:
-            st.error(f"Something went wrong: {e}")
+    except Exception as e:
+        st.error(f"Something went wrong: {e}")
