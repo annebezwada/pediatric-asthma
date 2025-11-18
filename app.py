@@ -445,7 +445,7 @@ if submitted:
         }
 
         st.session_state["last_plan"] = plan  # cache so it persists
-        st.experimental_rerun()  # immediately rerun to display via render_plan above
+        st.rerun()  # immediately rerun to display via render_plan above
 
     except Exception as e:
         st.error(f"Something went wrong: {e}")
