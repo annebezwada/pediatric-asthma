@@ -12,8 +12,8 @@ import datetime as dt
 #  CONFIG: API KEYS (PUT YOUR REAL KEYS HERE)
 # =============================================================================
 
-GEOAPIFY_KEY = "YOUR_GEOAPIFY_KEY_HERE"
-AIRNOW_KEY = "YOUR_AIRNOW_KEY_HERE"
+GEOAPIFY_KEY = "f379915c3e174f519467d3b78a8586ca"
+AIRNOW_KEY = "4288390E-A717-4DB1-9B4C-6BC8A983236D"
 
 # =============================================================================
 #  CORE HELPERS: GEOAPIFY + AIRNOW
