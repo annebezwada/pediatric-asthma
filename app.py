@@ -1,0 +1,446 @@
+import streamlit as st
+from streamlit_folium import st_folium
+import requests
+import folium
+from dataclasses import dataclass
+from typing import List, Tuple, Optional
+from statistics import mean
+from urllib.parse import quote_plus
+import datetime as dt
+
+# ===================== Core Helpers (Geoapify + AirNow) =====================
+
+def geoapify_geocode(place: str, api_key: str) -> Tuple[float, float, str]:
+    """Return (lat, lon, label) for a place name using Geoapify."""
+    url = "https://api.geoapify.com/v1/geocode/search"
+    params = {"text": place, "apiKey": api_key}
+    r = requests.get(url, params=params, timeout=20)
+    data = r.json()
+    features = data.get("features", [])
+    if not features:
+        raise ValueError(f"No geocoding result for '{place}'. Response: {data}")
+    feat = features[0]
+    lon, lat = feat["geometry"]["coordinates"]
+    label = feat["properties"].get("formatted", place)
+    return float(lat), float(lon), label
+
+
+def geoapify_route(
+    start: Tuple[float, float],
+    end: Tuple[float, float],
+    api_key: str,
+    route_type: str = "balanced",
+    avoid: Optional[str] = None,
+) -> dict:
+    """
+    Get a single driving route between two points using Geoapify Routing API (GeoJSON).
+    start/end: (lat, lon)
+    route_type: 'balanced', 'short', 'less_maneuvers'
+    avoid: 'highways', 'tolls', etc. (optional)
+    """
+    url = "https://api.geoapify.com/v1/routing"
+    waypoints = f"{start[0]},{start[1]}|{end[0]},{end[1]}"
+    params = {
+        "waypoints": waypoints,
+        "mode": "drive",
+        "type": route_type,
+        "format": "geojson",
+        "apiKey": api_key,
+    }
+    if avoid:
+        params["avoid"] = avoid
+
+    r = requests.get(url, params=params, timeout=30)
+    data = r.json()
+    features = data.get("features", [])
+    if not features:
+        raise ValueError(f"No routes returned by Geoapify. Response: {data}")
+    feature = features[0]
+    props = feature.get("properties", {})
+    distance_m = float(props.get("distance", 0.0))
+    duration_s = float(props.get("time", 0.0))
+
+    # GeoJSON MultiLineString -> flatten to list of (lat, lon)
+    geom = feature.get("geometry", {})
+    coords = geom.get("coordinates", [])
+    latlon_points: List[Tuple[float, float]] = []
+    for line in coords:
+        for lon, lat in line:
+            latlon_points.append((float(lat), float(lon)))
+
+    if not latlon_points:
+        raise ValueError(f"Route geometry missing. Response: {data}")
+
+    return {
+        "distance_m": distance_m,
+        "duration_s": duration_s,
+        "coords": latlon_points,
+    }
+
+
+def airnow_aqi(lat: float, lon: float, api_key: str, distance_miles: int = 25) -> Optional[int]:
+    """Get current AQI near a point from AirNow. Returns max AQI or None."""
+    url = "https://www.airnowapi.org/aq/observation/latLong/current"
+    params = {
+        "format": "application/json",
+        "latitude": f"{lat:.4f}",
+        "longitude": f"{lon:.4f}",
+        "distance": str(distance_miles),
+        "API_KEY": api_key,
+    }
+    r = requests.get(url, params=params, timeout=20)
+    try:
+        data = r.json()
+    except Exception:
+        return None
+
+    if not data or (isinstance(data, dict) and data.get("Message")):
+        return None
+
+    try:
+        return max(int(item.get("AQI", 0)) for item in data)
+    except Exception:
+        return None
+
+
+# =============== Sampling + scoring routes ===============
+
+@dataclass
+class RouteScore:
+    name: str
+    distance_km: float
+    duration_min: float
+    avg_aqi: float
+    max_aqi: int
+    num_samples: int
+    maps_url: str
+    coords: List[Tuple[float, float]]  # for map
+
+
+def sample_points(coords: List[Tuple[float, float]], max_samples: int = 10) -> List[Tuple[float, float]]:
+    """Downsample route coordinates so we don't spam AirNow."""
+    if len(coords) <= max_samples:
+        return coords
+    step = max(1, len(coords) // max_samples)
+    return [coords[i] for i in range(0, len(coords), step)][:max_samples]
+
+
+def score_route(
+    coords: List[Tuple[float, float]],
+    airnow_key: str,
+    origin_label: str,
+    dest_label: str,
+    name: str,
+    distance_m: float,
+    duration_s: float,
+) -> Optional[RouteScore]:
+    pts = sample_points(coords, max_samples=10)
+    aqis = []
+    for lat, lon in pts:
+        aqi = airnow_aqi(lat, lon, airnow_key)
+        if aqi is not None:
+            aqis.append(aqi)
+
+    if not aqis:
+        return None
+
+    avg_aqi = mean(aqis)
+    max_aqi = max(aqis)
+    maps_url = f"https://www.google.com/maps/dir/{quote_plus(origin_label)}/{quote_plus(dest_label)}"
+
+    return RouteScore(
+        name=name,
+        distance_km=distance_m / 1000.0,
+        duration_min=duration_s / 60.0,
+        avg_aqi=avg_aqi,
+        max_aqi=max_aqi,
+        num_samples=len(aqis),
+        maps_url=maps_url,
+        coords=coords,
+    )
+
+
+def plan_clean_routes_geoapify(
+    origin: str,
+    destination: str,
+    geoapify_key: str,
+    airnow_key: str,
+) -> List[RouteScore]:
+    """
+    Agentic planner:
+      1. Geocode origin/destination.
+      2. Get multiple driving routes (short, balanced, avoid highways).
+      3. Sample AQI along each route.
+      4. Rank routes by pollution exposure.
+    """
+    o_lat, o_lon, o_label = geoapify_geocode(origin, geoapify_key)
+    d_lat, d_lon, d_label = geoapify_geocode(destination, geoapify_key)
+    start = (o_lat, o_lon)
+    end = (d_lat, d_lon)
+
+    configs = [
+        ("Shortest", {"route_type": "short", "avoid": None}),
+        ("Balanced", {"route_type": "balanced", "avoid": None}),
+        ("Avoid highways", {"route_type": "balanced", "avoid": "highways"}),
+    ]
+
+    scores: List[RouteScore] = []
+
+    for name, cfg in configs:
+        try:
+            r = geoapify_route(start, end, geoapify_key, **cfg)
+        except Exception as e:
+            # Skip configs that fail (e.g., no avoid-highways path)
+            continue
+
+        s = score_route(
+            coords=r["coords"],
+            airnow_key=airnow_key,
+            origin_label=o_label,
+            dest_label=d_label,
+            name=name,
+            distance_m=r["distance_m"],
+            duration_s=r["duration_s"],
+        )
+        if s:
+            scores.append(s)
+
+    if not scores:
+        raise ValueError("Could not score any routes (routing or AQI failed).")
+
+    scores.sort(key=lambda s: (s.avg_aqi, s.max_aqi))
+    return scores
+
+
+# =============== Forecast helpers (WHEN to travel) ===============
+
+def airnow_forecast_zip(zip_code: str, api_key: str, distance_miles: int = 25):
+    """
+    Get AirNow AQI forecast for a ZIP code for the next few days.
+    Returns list of {date, aqi, category, pollutant}.
+    """
+    url = "https://www.airnowapi.org/aq/forecast/zipCode/"
+    params = {
+        "format": "application/json",
+        "zipCode": zip_code,
+        "distance": str(distance_miles),
+        "API_KEY": api_key,
+    }
+    r = requests.get(url, params=params, timeout=20)
+    try:
+        data = r.json()
+    except Exception:
+        raise ValueError(f"Could not decode AirNow forecast response:\n{r.text[:300]}")
+
+    if not data or (isinstance(data, dict) and data.get("Message")):
+        raise ValueError(f"No forecast data returned for ZIP {zip_code}. Response: {data}")
+
+    forecast_days = []
+    for item in data:
+        try:
+            date_str = item.get("DateForecast") or item.get("DateIssue")
+            date_obj = dt.datetime.strptime(date_str.split("T")[0], "%Y-%m-%d").date()
+        except Exception:
+            date_obj = dt.date.today()
+
+        forecast_days.append({
+            "date": date_obj,
+            "aqi": int(item.get("AQI", 0)),
+            "category": item.get("Category", {}).get("Name", "Unknown"),
+            "pollutant": item.get("ParameterName", "Unknown"),
+        })
+
+    # Merge pollutants by date (keep worst AQI)
+    by_date = {}
+    for f in forecast_days:
+        d = f["date"]
+        if d not in by_date or f["aqi"] > by_date[d]["aqi"]:
+            by_date[d] = f
+
+    return [by_date[d] for d in sorted(by_date.keys())]
+
+
+def suggest_best_travel_day(zip_code: str, api_key: str, look_ahead_days: int = 3):
+    """
+    Suggest best day in next N days (min AQI).
+    """
+    all_fc = airnow_forecast_zip(zip_code, api_key)
+    today = dt.date.today()
+    cutoff = today + dt.timedelta(days=look_ahead_days)
+
+    fc = [f for f in all_fc if today <= f["date"] <= cutoff]
+    if not fc:
+        raise ValueError("No forecast entries in the desired look-ahead window.")
+
+    best = min(fc, key=lambda x: x["aqi"])
+    return {"candidates": fc, "best": best}
+
+
+# =============== Map visualization ===============
+
+def show_routes_map(routes: List[RouteScore]) -> folium.Map:
+    """
+    Show all candidate routes on an interactive map.
+    Cleanest route = green, others = orange/red/etc.
+    """
+    all_coords = [pt for r in routes for pt in r.coords]
+    center_lat = sum(lat for lat, _ in all_coords) / len(all_coords)
+    center_lon = sum(lon for _, lon in all_coords) / len(all_coords)
+
+    m = folium.Map(location=[center_lat, center_lon], zoom_start=11)
+
+    colors = ["green", "orange", "red", "blue", "purple"]
+    for idx, r in enumerate(routes):
+        color = colors[idx % len(colors)]
+        tooltip = (
+            f"{r.name}: avg AQI {r.avg_aqi:.1f}, max {r.max_aqi}, "
+            f"{r.distance_km:.1f} km / {r.duration_min:.0f} min"
+        )
+
+        folium.PolyLine(
+            locations=[(lat, lon) for lat, lon in r.coords],
+            color=color,
+            weight=6 if idx == 0 else 4,
+            opacity=0.85 if idx == 0 else 0.6,
+            tooltip=tooltip,
+        ).add_to(m)
+
+    first = routes[0]
+    start_lat, start_lon = first.coords[0]
+    end_lat, end_lon = first.coords[-1]
+
+    folium.Marker([start_lat, start_lon], popup="Start").add_to(m)
+    folium.Marker([end_lat, end_lon], popup="Destination").add_to(m)
+
+    return m
+
+
+# ===================== Streamlit App UI =====================
+
+st.set_page_config(page_title="Asthma Guardian – Clean Route Planner", layout="wide")
+
+st.title("Asthma Guardian – Clean Route & Travel Planner")
+st.markdown(
+    "Support expecting parents by finding **cleaner-air routes** and the "
+    "**best day to travel** based on air quality.\n\n"
+    "_For educational use only – not medical advice._"
+)
+
+with st.expander("💡 What this app does", expanded=False):
+    st.write(
+        "- Uses **Geoapify** for driving routes\n"
+        "- Uses **AirNow** for air quality and forecasts\n"
+        "- Compares multiple route types (shortest, balanced, avoid highways)\n"
+        "- Samples AQI along each route and ranks them by exposure\n"
+        "- Uses AQI forecast at home ZIP to suggest a better day for non-urgent trips\n"
+    )
+
+# Sidebar: keys + global settings
+st.sidebar.header("API Keys & Settings")
+geoapify_key = st.sidebar.text_input("Geoapify API key", type="password")
+airnow_key = st.sidebar.text_input("AirNow API key", type="password")
+home_zip = st.sidebar.text_input("Home ZIP code", value="20874")
+look_ahead_days = st.sidebar.slider("Look ahead (days)", min_value=1, max_value=7, value=3)
+
+st.sidebar.markdown("---")
+mode = st.sidebar.radio("Mode", ["Parent view", "Kid-friendly summary"])
+
+# Main form
+st.subheader("Plan a trip")
+
+with st.form("trip_form"):
+    origin = st.text_input("Starting address", "Germantown, MD")
+    destination = st.text_input("Destination", "Children's National Hospital, Washington, DC")
+    submitted = st.form_submit_button("Plan cleanest trip ✨")
+
+if submitted:
+    if not geoapify_key or not airnow_key:
+        st.error("Please enter both Geoapify and AirNow API keys in the sidebar.")
+    else:
+        try:
+            with st.spinner("Thinking like an Asthma Guardian…"):
+                # 1) Forecast (WHEN)
+                forecast_plan = suggest_best_travel_day(home_zip, airnow_key, look_ahead_days)
+                candidates = forecast_plan["candidates"]
+                best_day = forecast_plan["best"]
+
+                # 2) Routes (HOW)
+                routes = plan_clean_routes_geoapify(origin, destination, geoapify_key, airnow_key)
+                best_route = routes[0]
+
+            # ---- WHEN section ----
+            st.subheader("🕒 When should we go?")
+
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                rows = [
+                    {
+                        "Date": f["date"].strftime("%a %b %d"),
+                        "AQI": f["aqi"],
+                        "Category": f["category"],
+                        "Pollutant": f["pollutant"],
+                    }
+                    for f in candidates
+                ]
+                st.write("Forecast for the next few days (worst pollutant per day):")
+                st.table(rows)
+
+            with col2:
+                st.metric(
+                    label="Suggested day for non-urgent trips",
+                    value=best_day["date"].strftime("%a %b %d"),
+                    delta=f"AQI {best_day['aqi']} ({best_day['category']})",
+                )
+
+            # ---- HOW section ----
+            st.subheader("🧭 How should we go?")
+
+            route_rows = []
+            for r in routes:
+                route_rows.append({
+                    "Route": r.name,
+                    "Distance (km)": f"{r.distance_km:.1f}",
+                    "Time (min)": f"{r.duration_min:.0f}",
+                    "Avg AQI": f"{r.avg_aqi:.1f}",
+                    "Max AQI": r.max_aqi,
+                })
+            st.write("Routes ranked from **cleanest** (top) to **dirtiest**:")
+            st.table(route_rows)
+
+            st.success(
+                f"Recommended route: **{best_route.name}** "
+                f"({best_route.distance_km:.1f} km / {best_route.duration_min:.0f} min, "
+                f"avg AQI ≈ {best_route.avg_aqi:.1f}, max AQI {best_route.max_aqi})."
+            )
+            st.markdown(
+                f"[Open in Google Maps]({best_route.maps_url})  "
+                "(route shape is approximate but works for navigation)."
+            )
+
+            # ---- Map ----
+            st.subheader("🗺️ Route map (click & zoom)")
+            fmap = show_routes_map(routes)
+            st_folium(fmap, width=900, height=500)
+
+            # ---- Kid-friendly summary ----
+            if mode == "Kid-friendly summary":
+                st.subheader("🦉 Asthma Guardian says...")
+                # simple kid-friendly explanation
+                avg = best_route.avg_aqi
+                if avg <= 50:
+                    mood = "The air looks happy and clean today!"
+                elif avg <= 100:
+                    mood = "The air is okay, but we’re still being gentle with our lungs."
+                elif avg <= 150:
+                    mood = "The air is a bit grumpy, so this cleaner route helps your lungs stay calm."
+                else:
+                    mood = "The air isn’t feeling great today, so this route helps us stay as safe as we can."
+
+                st.write(
+                    f"“We’ll go on **{best_day['date'].strftime('%A')}** "
+                    f"and take the **{best_route.name}** path.\n\n"
+                    f"{mood} Thanks for taking such good care of baby lungs.” 💚"
+                )
+
+        except Exception as e:
+            st.error(f"Something went wrong: {e}")
