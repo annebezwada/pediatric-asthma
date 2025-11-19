@@ -338,7 +338,7 @@ def render_plan(plan: dict):
     best_route = plan["best_route"]
 
     # WHEN SECTION
-    st.subheader("🕒 When should we go?")
+    st.subheader("When should you go?")
 
     col1, col2 = st.columns([2, 1])
     with col1:
@@ -362,7 +362,7 @@ def render_plan(plan: dict):
         )
 
     # HOW SECTION
-    st.subheader("🧭 How should we go?")
+    st.subheader("How should you go?")
 
     route_rows = []
     for r in routes:
@@ -387,7 +387,7 @@ def render_plan(plan: dict):
     )
 
     # MAP SECTION
-    st.subheader("🗺️ Route map (color-coded by average AQI)")
+    st.subheader("Route map (color-coded by average AQI)")
     fmap = show_routes_map(routes)
     st_folium(fmap, width=900, height=500)
 
@@ -404,7 +404,7 @@ st.markdown(
     "_For educational use only – not medical advice._"
 )
 
-with st.expander("💡 What this app does", expanded=False):
+with st.expander("*What this app does", expanded=False):
     st.write(
         "- Uses **Geoapify** for driving routes\n"
         "- Uses **AirNow** for air quality and forecasts\n"
