@@ -8,8 +8,7 @@ from statistics import mean
 from urllib.parse import quote_plus
 import datetime as dt
 
-# =============================================================================
-#  CONFIG: API KEYS (PUT YOUR REAL KEYS HERE)
+#  CONFIG: API KEYS 
 # =============================================================================
 
 GEOAPIFY_KEY = "f379915c3e174f519467d3b78a8586ca"
