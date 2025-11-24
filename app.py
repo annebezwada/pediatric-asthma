@@ -391,48 +391,143 @@ def render_plan(plan: dict):
     st_folium(fmap, width=900, height=500)
 
 # =============================================================================
-#  STREAMLIT APP UI
+#  STREAMLIT APP UI (PRETTY VERSION)
 # =============================================================================
 
-st.set_page_config(page_title="Asthma Guardian – Clean Route Planner", layout="wide")
-
-st.title("Asthma Guardian – Clean Route & Travel Planner")
-st.markdown(
-    "Support expecting parents by finding **cleaner-air routes** and the "
-    "**best day to travel** based on air quality.\n\n"
-    "_For educational use only – not medical advice._"
+st.set_page_config(
+    page_title="Asthma Guardian – Clean Route Planner",
+    page_icon="🍼",
+    layout="wide"
 )
 
-with st.expander("*What this app does", expanded=False):
+# --- Custom CSS for colors, cards, and background ---
+st.markdown(
+    """
+    <style>
+    .stApp {
+        background: linear-gradient(135deg, #fdfbfb 0%, #e3f2fd 100%);
+    }
+    .main > div {
+        padding-top: 1rem;
+    }
+    .big-title {
+        font-size: 2.4rem;
+        font-weight: 700;
+        color: #264653;
+        margin-bottom: 0.25rem;
+    }
+    .subtitle {
+        font-size: 1rem;
+        color: #555;
+        margin-bottom: 0.5rem;
+    }
+    .pill {
+        background-color: #ffe0f0;
+        color: #ad1457;
+        padding: 4px 12px;
+        border-radius: 999px;
+        font-size: 0.8rem;
+        display: inline-block;
+        margin-bottom: 0.75rem;
+    }
+    .card {
+        background-color: #ffffff;
+        padding: 1.1rem 1rem;
+        border-radius: 0.9rem;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.04);
+        margin-bottom: 1rem;
+        border: 1px solid #f1f1f1;
+    }
+    .section-title {
+        font-size: 1.3rem;
+        font-weight: 600;
+        margin-bottom: 0.4rem;
+        color: #1f3b4d;
+    }
+    .small-label {
+        font-size: 0.85rem;
+        color: #666;
+    }
+    .sidebar-title {
+        font-weight: 600;
+        font-size: 1.1rem;
+        margin-bottom: 0.3rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+# --- Top header with optional mascot image ---
+header_col1, header_col2 = st.columns([3, 1])
+
+with header_col1:
+    st.markdown('<div class="pill">Agentic AI · Environmental Health</div>', unsafe_allow_html=True)
+    st.markdown('<div class="big-title">Asthma Guardian</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="subtitle">Helping expecting parents find cleaner-air routes '
+        'and safer travel days for baby lungs. 💚</div>',
+        unsafe_allow_html=True
+    )
+    st.markdown(
+        "_For educational use only – not medical advice. Always consult your clinician for health decisions._"
+    )
+
+with header_col2:
+    # If you add an image file like assets/guardian_owl.png, it will show here.
+    # Otherwise, this just shows a placeholder emoji.
+    try:
+        st.image("assets/guardian_owl.png", width=120)
+    except Exception:
+        st.markdown("🦉", unsafe_allow_html=True)
+        st.caption("Asthma Guardian")
+
+with st.expander("💡 What this app does", expanded=False):
     st.write(
         "- Uses **Geoapify** for driving routes\n"
         "- Uses **AirNow** for air quality and forecasts\n"
         "- Compares multiple route types (shortest, balanced, avoid highways)\n"
         "- Samples AQI along each route and ranks them by exposure\n"
-        "- Uses AQI forecast at home ZIP to suggest a better day for non-urgent trips\n"
+        "- Suggests a **cleaner route** and **better day** for non-urgent trips\n"
     )
 
-# Sidebar settings
-st.sidebar.header("Settings")
+# --- Sidebar settings ---
+st.sidebar.markdown('<div class="sidebar-title">🌎 Travel Settings</div>', unsafe_allow_html=True)
 home_zip = st.sidebar.text_input("Home ZIP code", value="20874")
-look_ahead_days = st.sidebar.slider("Look ahead (days)", min_value=1, max_value=7, value=3)
+look_ahead_days = st.sidebar.slider("Days ahead to check air quality", min_value=1, max_value=7, value=3)
+st.sidebar.markdown("---")
+st.sidebar.markdown("**Tip:** Try your home → hospital route and see how air quality changes.")
 
-# Main: trip planner form
-st.subheader("Plan a trip")
+# --- Main content: trip planner + results ---
+st.markdown("### ✨ Plan a cleaner-air trip")
 
-with st.form("trip_form"):
-    origin = st.text_input("Starting address", "Germantown, MD")
-    destination = st.text_input("Destination", "Children's National Hospital, Washington, DC")
-    submitted = st.form_submit_button("Plan cleanest trip ✨")
+with st.container():
+    with st.form("trip_form"):
+        col_a, col_b = st.columns(2)
+        with col_a:
+            origin = st.text_input("Starting address", "Germantown, MD")
+        with col_b:
+            destination = st.text_input("Destination", "Children's National Hospital, Washington, DC")
+
+        st.markdown(
+            '<span class="small-label">The app will compare multiple routes and pick the one '
+            'with the lowest air pollution exposure.</span>',
+            unsafe_allow_html=True
+        )
+        submitted = st.form_submit_button("🌈 Plan cleanest trip")
 
 # Show last successful result so it doesn't disappear on reruns
 if "last_plan" in st.session_state:
-    render_plan(st.session_state["last_plan"])
+    st.markdown("### 📊 Your latest Asthma Guardian plan")
+    with st.container():
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        render_plan(st.session_state["last_plan"])
+        st.markdown('</div>', unsafe_allow_html=True)
 
 # Handle new submission
 if submitted:
     try:
-        with st.spinner("Analyzing forecast and routes…"):
+        with st.spinner("Analyzing forecast and routes… breathing-friendly planning in progress 🌬️"):
             forecast_plan = suggest_best_travel_day(home_zip, look_ahead_days)
             routes = plan_clean_routes_geoapify(origin, destination)
 
@@ -443,8 +538,11 @@ if submitted:
             "best_route": routes[0],
         }
 
-        st.session_state["last_plan"] = plan  # cache so it persists
-        st.rerun()  # immediately rerun to display via render_plan above
+        st.session_state["last_plan"] = plan  # cache results so they persist
+        st.rerun()
 
     except Exception as e:
         st.error(f"Something went wrong: {e}")
+
+
+
