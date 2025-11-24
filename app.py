@@ -396,7 +396,7 @@ def render_plan(plan: dict):
 
 st.set_page_config(
     page_title="Asthma Guardian – Clean Route Planner",
-    page_icon="🍼",
+    page_icon="💙",
     layout="wide"
 )
 
@@ -466,7 +466,7 @@ with header_col1:
     st.markdown('<div class="big-title">Asthma Guardian</div>', unsafe_allow_html=True)
     st.markdown(
         '<div class="subtitle">Helping expecting parents find cleaner-air routes '
-        'and safer travel days for baby lungs. 💚</div>',
+        'and safer travel days for baby lungs. 💙</div>',
         unsafe_allow_html=True
     )
     st.markdown(
