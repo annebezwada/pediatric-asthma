@@ -459,7 +459,7 @@ st.markdown(
 )
 
 # --- Top header with optional mascot image ---
-header_col1 = st.columns([3])
+header_col1, header_col2 = st.columns([3, 1])
 
 with header_col1:
     st.markdown('<div class="pill">Agentic AI · Environmental Health</div>', unsafe_allow_html=True)
@@ -472,6 +472,14 @@ with header_col1:
     st.markdown(
         "_For educational use only – not medical advice. Always consult your clinician for health decisions._"
     )
+with header_col2:
+    # If you add an image file like assets/guardian_owl.png, it will show here.
+    # Otherwise, this just shows a placeholder emoji.
+    try:
+        st.image("assets/guardian_owl.png", width=120)
+    except Exception:
+        st.markdown("🦉", unsafe_allow_html=True)
+        st.caption("Asthma Guardian")
 
 with st.expander("💡 What this app does", expanded=False):
     st.write(
