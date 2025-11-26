@@ -494,8 +494,7 @@ with st.expander("💡 What this app does", expanded=False):
 st.sidebar.markdown('<div class="sidebar-title">🌎 Travel Settings</div>', unsafe_allow_html=True)
 home_zip = st.sidebar.text_input("Home ZIP code", value="20874")
 look_ahead_days = st.sidebar.slider("Days ahead to check air quality", min_value=1, max_value=7, value=3)
-st.sidebar.markdown("---")
-st.sidebar.markdown("**Tip:** Try your home → hospital route and see how air quality changes.")
+
 
 # --- Main content: trip planner + results ---
 st.markdown("### ✨ Plan a cleaner-air trip")
