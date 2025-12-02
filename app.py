@@ -3,7 +3,7 @@ from streamlit_folium import st_folium
 import requests
 import folium
 from dataclasses import dataclass
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
 from statistics import mean
 from urllib.parse import quote_plus
 import datetime as dt
@@ -212,7 +212,10 @@ def plan_clean_routes_geoapify(origin: str, destination: str) -> List[RouteScore
     scores.sort(key=lambda s: (s.avg_aqi, s.max_aqi))
     return scores
 
-#to find specific places along the way (urgent cares/resteraunts)
+# =============================================================================
+#  PLACES ALONG ROUTE (HOSPITALS / FOOD)
+# =============================================================================
+
 GEOAPIFY_PLACES_URL = "https://api.geoapify.com/v2/places"
 
 
@@ -306,7 +309,6 @@ def _places_along_route(
     return places[:max_results]
 
 
-
 def get_pediatric_care_stops(best_route) -> List[Dict]:
     """
     Pediatric hospitals / clinics / urgent care along route.
@@ -355,13 +357,6 @@ def get_food_stops(best_route) -> List[Dict]:
     categories = "catering.restaurant,catering.fast_food,catering.cafe"
     places = _places_along_route(best_route.coords, categories, max_results=20)
     return places
-
-
-
-
-
-
-
 
 # =============================================================================
 #  FORECAST HELPERS (WHEN TO TRAVEL)
@@ -473,7 +468,8 @@ def show_routes_map(
             tooltip=tooltip,
         ).add_to(m)
 
-        first = routes[0]
+    # start / end from best route (first in list)
+    first = routes[0]
     start_lat, start_lon = first.coords[0]
     end_lat, end_lon = first.coords[-1]
 
@@ -510,10 +506,10 @@ def render_plan(plan: dict):
     best_day = plan["forecast_best_day"]
     routes = plan["routes"]
     best_route = plan["best_route"]
+
     # Find pediatric care & food stops along the BEST route
     pediatric_stops = get_pediatric_care_stops(best_route)
     food_stops = get_food_stops(best_route)
-
 
     # WHEN SECTION
     st.subheader("When should you go?")
@@ -554,7 +550,7 @@ def render_plan(plan: dict):
     st.write("Routes ranked from **cleanest** (top) to **dirtiest**:")
     st.table(route_rows)
 
-        # Pediatric care section
+    # Pediatric care section
     st.markdown("### 🧸 Pediatric care along this route")
     if pediatric_stops:
         ped_rows = [
@@ -577,7 +573,7 @@ def render_plan(plan: dict):
     if food_stops:
         food_rows = []
         for f in food_stops:
-            if isinstance(f["rating"], (int, float, float)):
+            if isinstance(f["rating"], (int, float)):
                 rating = f"{f['rating']:.1f}"
             else:
                 rating = "N/A"
@@ -607,11 +603,12 @@ def render_plan(plan: dict):
 
     # MAP SECTION
     st.subheader("Route map (color-coded by average AQI)")
-    
-    # transparent card
     st.markdown('<div class="card-map">', unsafe_allow_html=True)
-    fmap = show_routes_map(routes)
-    # dimension change
+    fmap = show_routes_map(
+        routes,
+        pediatric_stops=pediatric_stops,
+        food_stops=food_stops,
+    )
     st_folium(fmap, width=1100, height=450)
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -677,12 +674,17 @@ st.markdown(
         font-size: 1.1rem;
         margin-bottom: 0.3rem;
     }
+    .card-map iframe {
+        border-radius: 14px;
+        border: none;
+        box-shadow: 0 4px 18px rgba(0,0,0,0.12);
+    }
     </style>
     """,
     unsafe_allow_html=True
 )
 
-# --- Top header with optional mascot image ---
+# --- Top header ---
 header_col1, header_col2 = st.columns([3, 1])
 
 with header_col1:
@@ -710,7 +712,6 @@ with st.expander("💡 What this app does", expanded=False):
 st.sidebar.markdown('<div class="sidebar-title">🌎 Travel Settings</div>', unsafe_allow_html=True)
 home_zip = st.sidebar.text_input("Home ZIP code", value="20874")
 look_ahead_days = st.sidebar.slider("Days ahead to check air quality", min_value=1, max_value=7, value=3)
-
 
 # --- Main content: trip planner + results ---
 st.markdown("### ✨ Plan a cleaner-air trip")
@@ -742,6 +743,7 @@ if "last_plan" in st.session_state:
 if submitted:
     try:
         with st.spinner("Analyzing forecast and routes… "):
+            # Forecast currently based on home ZIP
             forecast_plan = suggest_best_travel_day(home_zip, look_ahead_days)
             routes = plan_clean_routes_geoapify(origin, destination)
 
@@ -757,6 +759,3 @@ if submitted:
 
     except Exception as e:
         st.error(f"Something went wrong: {e}")
-
-
-
