@@ -355,7 +355,7 @@ def get_food_stops(best_route) -> List[Dict]:
     Food stops along route: restaurants, cafes, fast food.
     """
     categories = "catering.restaurant,catering.fast_food,catering.cafe"
-    places = _places_along_route(best_route.coords, categories, max_results=20)
+    places = _places_along_route(best_route.coords, categories, max_results=5)
     return places
 
 # =============================================================================
