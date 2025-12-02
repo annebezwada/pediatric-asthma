@@ -702,7 +702,7 @@ st.markdown(
     }
     .small-label {
         font-size: 0.85rem;
-        color: #666;
+        color: #ff0000;
     }
     .sidebar-title {
         font-weight: 600;
