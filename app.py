@@ -212,6 +212,156 @@ def plan_clean_routes_geoapify(origin: str, destination: str) -> List[RouteScore
     scores.sort(key=lambda s: (s.avg_aqi, s.max_aqi))
     return scores
 
+#to find specific places along the way (urgent cares/resteraunts)
+GEOAPIFY_PLACES_URL = "https://api.geoapify.com/v2/places"
+
+
+def _route_bbox(coords: List[tuple]):
+    """Return (min_lon, min_lat, max_lon, max_lat) for a route."""
+    lons = [lon for lat, lon in coords]
+    lats = [lat for lat, lon in coords]
+    return min(lons), min(lats), max(lons), max(lats)
+
+
+def _places_along_route(
+    coords: List[tuple],
+    categories: str,
+    max_results: int = 12,
+    bias_to_route: bool = True,
+) -> List[Dict]:
+    """
+    Query Geoapify Places within the bounding box of the route.
+    Returns a list of places with distance to route & basic info.
+    """
+    if not coords:
+        return []
+
+    min_lon, min_lat, max_lon, max_lat = _route_bbox(coords)
+
+    params = {
+        "apiKey": GEOAPIFY_KEY,
+        "categories": categories,
+        "filter": f"rect:{min_lon},{min_lat},{max_lon},{max_lat}",
+        "limit": 60,
+    }
+
+    try:
+        r = requests.get(GEOAPIFY_PLACES_URL, params=params, timeout=20)
+        data = r.json()
+    except Exception:
+        return []
+
+    features = data.get("features", [])
+    if not features:
+        return []
+
+    # LineString in lon, lat order for distance calc
+    line = LineString([(lon, lat) for lat, lon in coords])
+
+    places = []
+    for feat in features:
+        props = feat.get("properties", {})
+        geom = feat.get("geometry", {})
+        coords_feat = geom.get("coordinates", [])
+        if not coords_feat or len(coords_feat) < 2:
+            continue
+
+        lon, lat = coords_feat[0], coords_feat[1]
+        p = Point(lon, lat)
+        try:
+            distance_deg = line.distance(p)
+        except Exception:
+            distance_deg = 0.0
+
+        # rough km conversion (1 degree ≈ 111 km)
+        distance_km = distance_deg * 111.0
+
+        name = props.get("name") or props.get("address_line1") or "Unnamed place"
+        formatted = props.get("formatted") or props.get("address_line2") or ""
+        # Geoapify sometimes provides popularity in rank.popularity
+        rank = props.get("rank", {})
+        popularity = rank.get("popularity")
+        rating = props.get("rating") or popularity
+
+        places.append(
+            {
+                "name": name,
+                "lat": lat,
+                "lon": lon,
+                "address": formatted,
+                "distance_km": distance_km,
+                "rating": rating,
+                "raw": props,
+            }
+        )
+
+    # Sort by distance to route, then by rating/popularity (if available)
+    places.sort(
+        key=lambda x: (
+            x["distance_km"],
+            -(x["rating"] or 0),
+        )
+    )
+
+    return places[:max_results]
+
+
+def get_pediatric_care_stops(best_route) -> List[Dict]:
+    """
+    Pediatric hospitals / clinics / urgent care along route.
+    Tries to bias toward pediatric / children-specific places.
+    """
+    # Start with general healthcare categories
+    categories = (
+        "healthcare.hospital,healthcare.clinic,healthcare.doctor,healthcare.physician"
+    )
+    all_places = _places_along_route(best_route.coords, categories, max_results=25)
+
+    # Prefer pediatric / children’s facilities
+    pediatric_keywords = ["child", "children", "pediatric", "kids"]
+
+    def is_pediatric(p):
+        text = (p["name"] + " " + (p["address"] or "")).lower()
+        return any(k in text for k in pediatric_keywords)
+
+    pedi = [p for p in all_places if is_pediatric(p)]
+
+    # If we didn't find many clearly pediatric places, fall back to top hospitals/clinics
+    if len(pedi) < 3:
+        # Keep hospitals / clinics closest to route
+        fallback = [
+            p
+            for p in all_places
+            if "hospital" in p["raw"].get("categories", "")
+            or "clinic" in p["raw"].get("categories", "")
+        ]
+        # Combine pediatric + fallback (dedupe by name)
+        seen = set()
+        merged = []
+        for p in pedi + fallback:
+            if p["name"] not in seen:
+                seen.add(p["name"])
+                merged.append(p)
+        pedi = merged
+
+    return pedi[:10]
+
+
+def get_food_stops(best_route) -> List[Dict]:
+    """
+    Food stops along route: restaurants, cafes, fast food.
+    """
+    categories = "catering.restaurant,catering.fast_food,catering.cafe"
+    places = _places_along_route(best_route.coords, categories, max_results=20)
+    return places
+
+
+
+
+
+
+
+
 # =============================================================================
 #  FORECAST HELPERS (WHEN TO TRAVEL)
 # =============================================================================
@@ -292,7 +442,12 @@ def aqi_color(aqi: float) -> str:
     return "purple"
 
 
-def show_routes_map(routes: List[RouteScore]) -> folium.Map:
+def show_routes_map(
+    routes: List[RouteScore],
+    pediatric_stops: Optional[List[Dict]] = None,
+    food_stops: Optional[List[Dict]] = None,
+):
+ -> folium.Map:
     """
     Show all candidate routes on an interactive map.
     Color based on AQI; cleanest route drawn thicker.
@@ -355,6 +510,10 @@ def render_plan(plan: dict):
     best_day = plan["forecast_best_day"]
     routes = plan["routes"]
     best_route = plan["best_route"]
+    # Find pediatric care & food stops along the BEST route
+    pediatric_stops = get_pediatric_care_stops(best_route)
+    food_stops = get_food_stops(best_route)
+
 
     # WHEN SECTION
     st.subheader("When should you go?")
@@ -394,6 +553,47 @@ def render_plan(plan: dict):
         })
     st.write("Routes ranked from **cleanest** (top) to **dirtiest**:")
     st.table(route_rows)
+
+        # Pediatric care section
+    st.markdown("### 🧸 Pediatric care along this route")
+    if pediatric_stops:
+        ped_rows = [
+            {
+                "Name": p["name"],
+                "Distance from route (km)": f"{p['distance_km']:.1f}",
+                "Address": p["address"],
+            }
+            for p in pediatric_stops
+        ]
+        st.table(ped_rows)
+    else:
+        st.info(
+            "No pediatric hospitals or clinics were found very close to this route "
+            "in the Geoapify database."
+        )
+
+    # Food stops section
+    st.markdown("### 🍽️ Food stops for the family")
+    if food_stops:
+        food_rows = []
+        for f in food_stops:
+            if isinstance(f["rating"], (int, float, float)):
+                rating = f"{f['rating']:.1f}"
+            else:
+                rating = "N/A"
+            food_rows.append(
+                {
+                    "Name": f["name"],
+                    "Rating / popularity": rating,
+                    "Distance from route (km)": f"{f['distance_km']:.1f}",
+                    "Address": f["address"],
+                }
+            )
+        st.table(food_rows)
+    else:
+        st.info(
+            "No restaurants or cafes were found very close to this route in the database."
+        )
 
     st.success(
         f"Recommended route: **{best_route.name}** "
