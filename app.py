@@ -677,6 +677,7 @@ st.markdown(
         color: #555;
         margin-bottom: 0.5rem;
     }
+    #Agentic AI - Environmental health pill
     .pill {
         background-color: #ffe0f0;
         color: #ad1457;
@@ -702,7 +703,7 @@ st.markdown(
     }
     .small-label {
         font-size: 0.85rem;
-        color: #ff0000;
+        color: #666;
     }
     .sidebar-title {
         font-weight: 600;
