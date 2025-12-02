@@ -7,6 +7,8 @@ from typing import List, Tuple, Optional
 from statistics import mean
 from urllib.parse import quote_plus
 import datetime as dt
+from shapely.geometry import LineString, Point
+
 
 #  CONFIG: API KEYS 
 # =============================================================================
