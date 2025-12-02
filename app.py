@@ -387,8 +387,13 @@ def render_plan(plan: dict):
 
     # MAP SECTION
     st.subheader("Route map (color-coded by average AQI)")
+    
+    # transparent card
+    st.markdown('<div class="card-map">', unsafe_allow_html=True)
     fmap = show_routes_map(routes)
-    st_folium(fmap, width=900, height=500)
+    # dimension change
+    st_folium(fmap, width=1100, height=450)
+    st.markdown('</div>', unsafe_allow_html=True)
 
 #  STREAMLIT UI
 # =============================================================================
