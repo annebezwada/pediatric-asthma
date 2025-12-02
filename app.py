@@ -516,7 +516,7 @@ if "last_plan" in st.session_state:
 # Handle new submission
 if submitted:
     try:
-        with st.spinner("Analyzing forecast and routes… breathing-friendly planning in progress 🌬️"):
+        with st.spinner("Analyzing forecast and routes… "):
             forecast_plan = suggest_best_travel_day(home_zip, look_ahead_days)
             routes = plan_clean_routes_geoapify(origin, destination)
 
