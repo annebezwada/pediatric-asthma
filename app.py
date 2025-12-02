@@ -446,8 +446,7 @@ def show_routes_map(
     routes: List[RouteScore],
     pediatric_stops: Optional[List[Dict]] = None,
     food_stops: Optional[List[Dict]] = None,
-):
- -> folium.Map:
+) -> folium.Map:
     """
     Show all candidate routes on an interactive map.
     Color based on AQI; cleanest route drawn thicker.
