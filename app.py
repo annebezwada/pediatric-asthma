@@ -128,7 +128,6 @@ class RouteScore:
 
 
 def sample_points(coords: List[Tuple[float, float]], max_samples: int = 10) -> List[Tuple[float, float]]:
-    """Downsample route coordinates so we don't spam AirNow."""
     if len(coords) <= max_samples:
         return coords
     step = max(1, len(coords) // max_samples)
@@ -171,10 +170,10 @@ def score_route(
 
 def plan_clean_routes_geoapify(origin: str, destination: str) -> List[RouteScore]:
     """
-    1. Geocode origin/destination.
-    2. Get multiple driving routes (short, balanced, avoid highways).
-    3. Sample AQI along each route.
-    4. Rank routes by pollution exposure.
+    1. Geocode origin/destination
+    2. Get multiple driving routes (short, balanced, avoid highways)
+    3. Sample AQI along each route
+    4. Rank routes by pollution exposure
     """
     o_lat, o_lon, o_label = geoapify_geocode(origin)
     d_lat, d_lon, d_label = geoapify_geocode(destination)
@@ -220,7 +219,7 @@ GEOAPIFY_PLACES_URL = "https://api.geoapify.com/v2/places"
 
 
 def _route_bbox(coords: List[tuple]):
-    """Return (min_lon, min_lat, max_lon, max_lat) for a route."""
+    """Return (min_lon, min_lat, max_lon, max_lat) for route."""
     lons = [lon for lat, lon in coords]
     lats = [lat for lat, lon in coords]
     return min(lons), min(lats), max(lons), max(lats)
@@ -312,9 +311,9 @@ def _places_along_route(
 def get_pediatric_care_stops(best_route) -> List[Dict]:
     """
     Improved pediatric care finder:
-    1. Search pediatric-specific places first.
-    2. If empty, return the 5 closest hospitals/urgent cares along the route.
-    3. Guaranteed to return at least SOME care options.
+    1. Search pediatric-specific places first
+    2. If empty, return the 5 closest hospitals/urgent cares along the route
+    3. Should return at least SOME care options
     """
     categories = (
         "healthcare.hospital,healthcare.clinic,healthcare.doctor,healthcare.physician"
@@ -438,9 +437,9 @@ def show_routes_map(
     food_stops: Optional[List[Dict]] = None,
 ) -> folium.Map:
     """
-    Show all candidate routes on an interactive map.
-    Color based on AQI; cleanest route drawn thicker.
-    Also shows pediatric care and food stops along the best route.
+    * Show all candidate routes on an interactive map
+    * Color based on AQI; cleanest route drawn thicker
+    * Also shows pediatric care and food stops along the best route
     """
     # Center map on all route points
     all_coords = [pt for r in routes for pt in r.coords]
@@ -490,7 +489,7 @@ def show_routes_map(
         tooltip="Destination",
     ).add_to(m)
 
-    # Pediatric care markers (🩺)
+    # Pediatric care markers
     if pediatric_stops:
         for p in pediatric_stops:
             html = (
@@ -507,7 +506,7 @@ def show_routes_map(
                 popup=html,
             ).add_to(m)
 
-    # Food stop markers (🍽️)
+    # Food stop markers
     if food_stops:
         for f in food_stops:
             if isinstance(f.get("rating"), (int, float)):
@@ -532,7 +531,7 @@ def show_routes_map(
 
 
 # =============================================================================
-#  DISPLAY HELPERS (SO RESULTS DON'T DISAPPEAR)
+#  DISPLAY HELPERS
 # =============================================================================
 
 def render_plan(plan: dict):
