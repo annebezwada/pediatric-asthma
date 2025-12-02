@@ -316,14 +316,32 @@ def show_routes_map(routes: List[RouteScore]) -> folium.Map:
             tooltip=tooltip,
         ).add_to(m)
 
-    first = routes[0]
+        first = routes[0]
     start_lat, start_lon = first.coords[0]
     end_lat, end_lon = first.coords[-1]
 
-    folium.Marker([start_lat, start_lon], popup="Start").add_to(m)
-    folium.Marker([end_lat, end_lon], popup="Destination").add_to(m)
+    # map icons
+    start_icon = folium.DivIcon(
+        html='<div style="font-size:22px; line-height:24px;">📍</div>'
+    )
+    dest_icon = folium.DivIcon(
+        html='<div style="font-size:22px; line-height:24px;">📍</div>'
+    )
+
+    folium.Marker(
+        [start_lat, start_lon],
+        icon=start_icon,
+        tooltip="Starting point"
+    ).add_to(m)
+
+    folium.Marker(
+        [end_lat, end_lon],
+        icon=dest_icon,
+        tooltip="Destination"
+    ).add_to(m)
 
     return m
+
 
 # =============================================================================
 #  DISPLAY HELPERS (SO RESULTS DON'T DISAPPEAR)
