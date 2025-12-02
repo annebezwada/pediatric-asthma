@@ -390,8 +390,7 @@ def render_plan(plan: dict):
     fmap = show_routes_map(routes)
     st_folium(fmap, width=900, height=500)
 
-# =============================================================================
-#  STREAMLIT APP UI (PRETTY VERSION)
+#  STREAMLIT UI
 # =============================================================================
 
 st.set_page_config(
@@ -465,21 +464,13 @@ with header_col1:
     st.markdown('<div class="pill">Agentic AI · Environmental Health</div>', unsafe_allow_html=True)
     st.markdown('<div class="big-title">Asthma Guardian</div>', unsafe_allow_html=True)
     st.markdown(
-        '<div class="subtitle">Helping expecting parents find cleaner-air routes '
+        '<div class="subtitle">Helping parents find cleaner-air routes '
         'and safer travel days for baby lungs. 💙</div>',
         unsafe_allow_html=True
     )
     st.markdown(
-        "_For educational use only – not medical advice. Always consult your clinician for health decisions._"
+        "_For educational use only – not medical advice. Always consult your doctor for health decisions._"
     )
-with header_col2:
-    # If you add an image file like assets/guardian_owl.png, it will show here.
-    # Otherwise, this just shows a placeholder emoji.
-    try:
-        st.image("assets/guardian_owl.png", width=120)
-    except Exception:
-        st.markdown("🦉", unsafe_allow_html=True)
-        st.caption("Asthma Guardian")
 
 with st.expander("💡 What this app does", expanded=False):
     st.write(
@@ -487,7 +478,7 @@ with st.expander("💡 What this app does", expanded=False):
         "- Uses **AirNow** for air quality and forecasts\n"
         "- Compares multiple route types (shortest, balanced, avoid highways)\n"
         "- Samples AQI along each route and ranks them by exposure\n"
-        "- Suggests a **cleaner route** and **better day** for non-urgent trips\n"
+        "- Suggests a **cleaner route** and **better days** for non-urgent trips\n"
     )
 
 # --- Sidebar settings ---
@@ -503,16 +494,16 @@ with st.container():
     with st.form("trip_form"):
         col_a, col_b = st.columns(2)
         with col_a:
-            origin = st.text_input("Starting address", "Germantown, MD")
+            origin = st.text_input("Starting address", "Baltimore, MD")
         with col_b:
-            destination = st.text_input("Destination", "Children's National Hospital, Washington, DC")
+            destination = st.text_input("Destination", "Washington, DC")
 
         st.markdown(
             '<span class="small-label">The app will compare multiple routes and pick the one '
             'with the lowest air pollution exposure.</span>',
             unsafe_allow_html=True
         )
-        submitted = st.form_submit_button("🌈 Plan cleanest trip")
+        submitted = st.form_submit_button("Plan the cleanest trip")
 
 # Show last successful result so it doesn't disappear on reruns
 if "last_plan" in st.session_state:
