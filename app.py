@@ -273,12 +273,12 @@ def _places_along_route(
         except Exception:
             distance_deg = 0.0
 
-        # rough km conversion (1 degree ≈ 111 km)
+        # rough km conversion
         distance_km = distance_deg * 111.0
 
         name = props.get("name") or props.get("address_line1") or "Unnamed place"
         formatted = props.get("formatted") or props.get("address_line2") or ""
-        # Geoapify sometimes provides popularity in rank.popularity
+
         rank = props.get("rank", {})
         popularity = rank.get("popularity")
         rating = props.get("rating") or popularity
@@ -295,7 +295,7 @@ def _places_along_route(
             }
         )
 
-    # Sort by distance to route, then by rating/popularity (if available)
+    # Sort places by distance to route + rating
     places.sort(
         key=lambda x: (
             x["distance_km"],
@@ -304,6 +304,7 @@ def _places_along_route(
     )
 
     return places[:max_results]
+
 
 
 def get_pediatric_care_stops(best_route) -> List[Dict]:
