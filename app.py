@@ -446,13 +446,16 @@ def show_routes_map(
     """
     Show all candidate routes on an interactive map.
     Color based on AQI; cleanest route drawn thicker.
+    Also shows pediatric care and food stops along the best route.
     """
+    # Center map on all route points
     all_coords = [pt for r in routes for pt in r.coords]
     center_lat = sum(lat for lat, _ in all_coords) / len(all_coords)
     center_lon = sum(lon for _, lon in all_coords) / len(all_coords)
 
     m = folium.Map(location=[center_lat, center_lon], zoom_start=11)
 
+    # Draw routes
     for idx, r in enumerate(routes):
         color = aqi_color(r.avg_aqi)
         tooltip = (
@@ -468,30 +471,68 @@ def show_routes_map(
             tooltip=tooltip,
         ).add_to(m)
 
-    # start / end from best route (first in list)
+    # Start / end from best route (first in list)
     first = routes[0]
     start_lat, start_lon = first.coords[0]
     end_lat, end_lon = first.coords[-1]
 
-    # map icons
+    # Start/destination icons
     start_icon = folium.DivIcon(
-        html='<div style="font-size:22px; line-height:24px;">📍</div>'
+        html='<div style="font-size:22px; line-height:24px;">🍼</div>'
     )
     dest_icon = folium.DivIcon(
-        html='<div style="font-size:22px; line-height:24px;">📍</div>'
+        html='<div style="font-size:22px; line-height:24px;">🏥</div>'
     )
 
     folium.Marker(
         [start_lat, start_lon],
         icon=start_icon,
-        tooltip="Starting point"
+        tooltip="Starting point",
     ).add_to(m)
 
     folium.Marker(
         [end_lat, end_lon],
         icon=dest_icon,
-        tooltip="Destination"
+        tooltip="Destination",
     ).add_to(m)
+
+    # Pediatric care markers (🩺)
+    if pediatric_stops:
+        for p in pediatric_stops:
+            html = (
+                f"<b>{p['name']}</b><br/>{p['address']}<br/>"
+                f"{p['distance_km']:.1f} km from route"
+            )
+            ped_icon = folium.DivIcon(
+                html='<div style="font-size:20px; line-height:20px;">🩺</div>'
+            )
+            folium.Marker(
+                [p["lat"], p["lon"]],
+                icon=ped_icon,
+                tooltip=p["name"],
+                popup=html,
+            ).add_to(m)
+
+    # Food stop markers (🍽️)
+    if food_stops:
+        for f in food_stops:
+            if isinstance(f.get("rating"), (int, float)):
+                rating_str = f"Rating: {f['rating']:.1f}<br/>"
+            else:
+                rating_str = ""
+            html = (
+                f"<b>{f['name']}</b><br/>{f['address']}<br/>"
+                f"{rating_str}{f['distance_km']:.1f} km from route"
+            )
+            food_icon = folium.DivIcon(
+                html='<div style="font-size:20px; line-height:20px;">🍽️</div>'
+            )
+            folium.Marker(
+                [f["lat"], f["lon"]],
+                icon=food_icon,
+                tooltip=f["name"],
+                popup=html,
+            ).add_to(m)
 
     return m
 
