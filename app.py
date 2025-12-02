@@ -311,43 +311,37 @@ def _places_along_route(
 
 def get_pediatric_care_stops(best_route) -> List[Dict]:
     """
-    Pediatric hospitals / clinics / urgent care along route.
-    Tries to bias toward pediatric / children-specific places.
+    Improved pediatric care finder:
+    1. Search pediatric-specific places first.
+    2. If empty, return the 5 closest hospitals/urgent cares along the route.
+    3. Guaranteed to return at least SOME care options.
     """
-    # Start with general healthcare categories
     categories = (
         "healthcare.hospital,healthcare.clinic,healthcare.doctor,healthcare.physician"
     )
-    all_places = _places_along_route(best_route.coords, categories, max_results=25)
+    all_places = _places_along_route(best_route.coords, categories, max_results=30)
 
-    # Prefer pediatric / children’s facilities
     pediatric_keywords = ["child", "children", "pediatric", "kids"]
 
     def is_pediatric(p):
         text = (p["name"] + " " + (p["address"] or "")).lower()
         return any(k in text for k in pediatric_keywords)
 
-    pedi = [p for p in all_places if is_pediatric(p)]
+    pediatric_only = [p for p in all_places if is_pediatric(p)]
 
-    # If we didn't find many clearly pediatric places, fall back to top hospitals/clinics
-    if len(pedi) < 3:
-        # Keep hospitals / clinics closest to route
-        fallback = [
-            p
-            for p in all_places
-            if "hospital" in p["raw"].get("categories", "")
-            or "clinic" in p["raw"].get("categories", "")
-        ]
-        # Combine pediatric + fallback (dedupe by name)
-        seen = set()
-        merged = []
-        for p in pedi + fallback:
-            if p["name"] not in seen:
-                seen.add(p["name"])
-                merged.append(p)
-        pedi = merged
+    # If pediatric-specific results exist → return top 5
+    if pediatric_only:
+        pediatric_only.sort(key=lambda p: (p["distance_km"], -(p["rating"] or 0)))
+        return pediatric_only[:5]
 
-    return pedi[:10]
+    # Otherwise: return the closest 5 hospitals / clinics
+    closest_general = sorted(
+        all_places,
+        key=lambda p: (p["distance_km"], -(p["rating"] or 0))
+    )
+
+    return closest_general[:5]
+
 
 
 def get_food_stops(best_route) -> List[Dict]:
